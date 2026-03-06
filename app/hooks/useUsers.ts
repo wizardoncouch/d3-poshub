@@ -12,7 +12,6 @@ export default function useUsers() {
         });
         const res = await localDB.find({
             selector: { type: "user" },
-            limit: 1
         });
         setUsers(res.docs as any);
     }
