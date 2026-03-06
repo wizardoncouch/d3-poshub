@@ -28,36 +28,26 @@ jobs:
       # - CRA: build
       # - Vite: dist
       # - Next export: out
-      - name: Deploy SPA to CouchDB (_design/app attachments)
+      - name: Deploy SPA to CouchDB
         env:
-          COUCH_URL: ${{ secrets.COUCH_URL }} # e.g. http://your-host:5984  OR https://your-domain/db
-          COUCH_DB: ${{ secrets.COUCH_DB }} # e.g. pos_ui
+          COUCH_URL: ${{ secrets.COUCH_URL }}
+          COUCH_DB: ui
           COUCH_USER: ${{ secrets.COUCH_USER }}
           COUCH_PASS: ${{ secrets.COUCH_PASS }}
           COUCH_DDOC: app
-          BUILD_DIR: build # <-- change to dist/out if needed
+          BUILD_DIR: dist
         run: |
           node <<'NODE'
           const fs = require("fs");
           const path = require("path");
 
-          const COUCH_URL = process.env.COUCH_URL?.replace(/\/+$/, "");
+          const COUCH_URL = process.env.COUCH_URL.replace(/\/+$/, "");
           const COUCH_DB = process.env.COUCH_DB;
           const COUCH_USER = process.env.COUCH_USER;
           const COUCH_PASS = process.env.COUCH_PASS;
           const COUCH_DDOC = process.env.COUCH_DDOC || "app";
-          const BUILD_DIR = process.env.BUILD_DIR || "build";
+          const BUILD_DIR = process.env.BUILD_DIR || "dist";
 
-          if (!COUCH_URL || !COUCH_DB || !COUCH_USER || !COUCH_PASS) {
-            console.error("Missing required env: COUCH_URL, COUCH_DB, COUCH_USER, COUCH_PASS");
-            process.exit(1);
-          }
-          if (!fs.existsSync(BUILD_DIR)) {
-            console.error(`BUILD_DIR not found: ${BUILD_DIR}`);
-            process.exit(1);
-          }
-
-          // Small content-type mapper (enough for typical SPA builds)
           const mime = (p) => {
             const ext = path.extname(p).toLowerCase();
             return ({
@@ -71,13 +61,10 @@ jobs:
               ".jpeg": "image/jpeg",
               ".webp": "image/webp",
               ".ico": "image/x-icon",
-              ".txt": "text/plain; charset=utf-8",
               ".map": "application/json; charset=utf-8",
               ".woff": "font/woff",
               ".woff2": "font/woff2",
-              ".ttf": "font/ttf",
-              ".eot": "application/vnd.ms-fontobject",
-              ".xml": "application/xml; charset=utf-8",
+              ".ttf": "font/ttf"
             })[ext] || "application/octet-stream";
           };
 
@@ -92,72 +79,60 @@ jobs:
           };
 
           const authHeader = "Basic " + Buffer.from(`${COUCH_USER}:${COUCH_PASS}`).toString("base64");
-          const couch = async (method, urlPath, bodyObj) => {
-            const url = `${COUCH_URL}/${urlPath.replace(/^\/+/, "")}`;
-            const res = await fetch(url, {
+
+          async function request(method, urlPath, body) {
+            const res = await fetch(`${COUCH_URL}/${urlPath.replace(/^\/+/, "")}`, {
               method,
               headers: {
-                "Authorization": authHeader,
+                Authorization: authHeader,
                 "Content-Type": "application/json",
-                "Accept": "application/json",
+                Accept: "application/json"
               },
-              body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+              body: body ? JSON.stringify(body) : undefined
             });
             const text = await res.text();
             let json;
             try { json = JSON.parse(text); } catch { json = { raw: text }; }
             if (!res.ok && !(res.status === 404 && method === "GET")) {
-              throw new Error(`${method} ${url} -> ${res.status}: ${text}`);
+              throw new Error(`${method} ${urlPath} -> ${res.status}: ${text}`);
             }
-            return { status: res.status, json };
-          };
+            return json;
+          }
 
           (async () => {
-            // Ensure DB exists (optional; remove if you don’t want auto-create)
-            await couch("PUT", `/${COUCH_DB}`, null).catch(() => {});
-
-            // Get existing design doc to preserve _rev
-            let existingRev = null;
+            let rev;
             try {
-              const got = await couch("GET", `/${COUCH_DB}/_design/${COUCH_DDOC}`, null);
-              existingRev = got?.json?._rev || null;
+              const existing = await request("GET", `/${COUCH_DB}/_design/${COUCH_DDOC}`);
+              rev = existing._rev;
             } catch {}
 
-            // Build attachments payload
-            const files = walk(BUILD_DIR);
             const attachments = {};
-            for (const filePath of files) {
-              const rel = path.relative(BUILD_DIR, filePath).replace(/\\/g, "/");
-              const buf = fs.readFileSync(filePath);
+            for (const file of walk(BUILD_DIR)) {
+              const rel = path.relative(BUILD_DIR, file).replace(/\\/g, "/");
               attachments[rel] = {
-                content_type: mime(filePath),
-                data: buf.toString("base64"),
+                content_type: mime(file),
+                data: fs.readFileSync(file).toString("base64")
               };
             }
 
-            // SPA rewrites:
-            // - "/" -> index.html
-            // - serve actual files if present (assets, etc)
-            // - fallback all routes to index.html for client-side routing
-            const ddoc = {
+            if (!attachments["index.html"]) {
+              throw new Error(`index.html not found in ${BUILD_DIR}`);
+            }
+
+            const doc = {
               _id: `_design/${COUCH_DDOC}`,
-              ...(existingRev ? { _rev: existingRev } : {}),
+              ...(rev ? { _rev: rev } : {}),
               rewrites: [
                 { from: "/", to: "index.html" },
-                { from: "/*", to: "*" },
-                { from: "/**", to: "index.html" }
+                { from: "/assets/*", to: "assets/*" },
+                { from: "/*", to: "index.html" }
               ],
-              _attachments: attachments,
+              _attachments: attachments
             };
 
-            const put = await couch("PUT", `/${COUCH_DB}/_design/${COUCH_DDOC}`, ddoc);
-            console.log("Deployed:", put.json);
-
-            console.log("");
-            console.log("Open:");
-            console.log(`- SPA: ${COUCH_URL}/${COUCH_DB}/_design/${COUCH_DDOC}/index.html`);
-            console.log(`- SPA via rewrite: ${COUCH_URL}/${COUCH_DB}/_design/${COUCH_DDOC}/_rewrite/`);
-          })().catch((err) => {
+            const result = await request("PUT", `/${COUCH_DB}/_design/${COUCH_DDOC}`, doc);
+            console.log(result);
+          })().catch(err => {
             console.error(err);
             process.exit(1);
           });
