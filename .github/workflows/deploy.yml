@@ -35,7 +35,7 @@ jobs:
           COUCH_USER: ${{ secrets.COUCH_USER }}
           COUCH_PASS: ${{ secrets.COUCH_PASS }}
           COUCH_DDOC: app
-          BUILD_DIR: dist
+          BUILD_DIR: build/client
         run: |
           node <<'NODE'
           const fs = require("fs");
@@ -46,7 +46,7 @@ jobs:
           const COUCH_USER = process.env.COUCH_USER;
           const COUCH_PASS = process.env.COUCH_PASS;
           const COUCH_DDOC = process.env.COUCH_DDOC || "app";
-          const BUILD_DIR = process.env.BUILD_DIR || "dist";
+          const BUILD_DIR = process.env.BUILD_DIR || "build";
 
           const mime = (p) => {
             const ext = path.extname(p).toLowerCase();
