@@ -1,0 +1,164 @@
+name: Build and Deploy SPA to CouchDB
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install & Build React
+        run: |
+          npm ci
+          npm run build
+
+      # If your build output folder is NOT "build", change this env to your real output folder:
+      # - CRA: build
+      # - Vite: dist
+      # - Next export: out
+      - name: Deploy SPA to CouchDB (_design/app attachments)
+        env:
+          COUCH_URL: ${{ secrets.COUCH_URL }} # e.g. http://your-host:5984  OR https://your-domain/db
+          COUCH_DB: ${{ secrets.COUCH_DB }} # e.g. pos_ui
+          COUCH_USER: ${{ secrets.COUCH_USER }}
+          COUCH_PASS: ${{ secrets.COUCH_PASS }}
+          COUCH_DDOC: app
+          BUILD_DIR: build # <-- change to dist/out if needed
+        run: |
+          node <<'NODE'
+          const fs = require("fs");
+          const path = require("path");
+
+          const COUCH_URL = process.env.COUCH_URL?.replace(/\/+$/, "");
+          const COUCH_DB = process.env.COUCH_DB;
+          const COUCH_USER = process.env.COUCH_USER;
+          const COUCH_PASS = process.env.COUCH_PASS;
+          const COUCH_DDOC = process.env.COUCH_DDOC || "app";
+          const BUILD_DIR = process.env.BUILD_DIR || "build";
+
+          if (!COUCH_URL || !COUCH_DB || !COUCH_USER || !COUCH_PASS) {
+            console.error("Missing required env: COUCH_URL, COUCH_DB, COUCH_USER, COUCH_PASS");
+            process.exit(1);
+          }
+          if (!fs.existsSync(BUILD_DIR)) {
+            console.error(`BUILD_DIR not found: ${BUILD_DIR}`);
+            process.exit(1);
+          }
+
+          // Small content-type mapper (enough for typical SPA builds)
+          const mime = (p) => {
+            const ext = path.extname(p).toLowerCase();
+            return ({
+              ".html": "text/html; charset=utf-8",
+              ".js": "application/javascript; charset=utf-8",
+              ".css": "text/css; charset=utf-8",
+              ".json": "application/json; charset=utf-8",
+              ".svg": "image/svg+xml",
+              ".png": "image/png",
+              ".jpg": "image/jpeg",
+              ".jpeg": "image/jpeg",
+              ".webp": "image/webp",
+              ".ico": "image/x-icon",
+              ".txt": "text/plain; charset=utf-8",
+              ".map": "application/json; charset=utf-8",
+              ".woff": "font/woff",
+              ".woff2": "font/woff2",
+              ".ttf": "font/ttf",
+              ".eot": "application/vnd.ms-fontobject",
+              ".xml": "application/xml; charset=utf-8",
+            })[ext] || "application/octet-stream";
+          };
+
+          const walk = (dir) => {
+            const out = [];
+            for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+              const full = path.join(dir, entry.name);
+              if (entry.isDirectory()) out.push(...walk(full));
+              else out.push(full);
+            }
+            return out;
+          };
+
+          const authHeader = "Basic " + Buffer.from(`${COUCH_USER}:${COUCH_PASS}`).toString("base64");
+          const couch = async (method, urlPath, bodyObj) => {
+            const url = `${COUCH_URL}/${urlPath.replace(/^\/+/, "")}`;
+            const res = await fetch(url, {
+              method,
+              headers: {
+                "Authorization": authHeader,
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+              },
+              body: bodyObj ? JSON.stringify(bodyObj) : undefined,
+            });
+            const text = await res.text();
+            let json;
+            try { json = JSON.parse(text); } catch { json = { raw: text }; }
+            if (!res.ok && !(res.status === 404 && method === "GET")) {
+              throw new Error(`${method} ${url} -> ${res.status}: ${text}`);
+            }
+            return { status: res.status, json };
+          };
+
+          (async () => {
+            // Ensure DB exists (optional; remove if you don’t want auto-create)
+            await couch("PUT", `/${COUCH_DB}`, null).catch(() => {});
+
+            // Get existing design doc to preserve _rev
+            let existingRev = null;
+            try {
+              const got = await couch("GET", `/${COUCH_DB}/_design/${COUCH_DDOC}`, null);
+              existingRev = got?.json?._rev || null;
+            } catch {}
+
+            // Build attachments payload
+            const files = walk(BUILD_DIR);
+            const attachments = {};
+            for (const filePath of files) {
+              const rel = path.relative(BUILD_DIR, filePath).replace(/\\/g, "/");
+              const buf = fs.readFileSync(filePath);
+              attachments[rel] = {
+                content_type: mime(filePath),
+                data: buf.toString("base64"),
+              };
+            }
+
+            // SPA rewrites:
+            // - "/" -> index.html
+            // - serve actual files if present (assets, etc)
+            // - fallback all routes to index.html for client-side routing
+            const ddoc = {
+              _id: `_design/${COUCH_DDOC}`,
+              ...(existingRev ? { _rev: existingRev } : {}),
+              rewrites: [
+                { from: "/", to: "index.html" },
+                { from: "/*", to: "*" },
+                { from: "/**", to: "index.html" }
+              ],
+              _attachments: attachments,
+            };
+
+            const put = await couch("PUT", `/${COUCH_DB}/_design/${COUCH_DDOC}`, ddoc);
+            console.log("Deployed:", put.json);
+
+            console.log("");
+            console.log("Open:");
+            console.log(`- SPA: ${COUCH_URL}/${COUCH_DB}/_design/${COUCH_DDOC}/index.html`);
+            console.log(`- SPA via rewrite: ${COUCH_URL}/${COUCH_DB}/_design/${COUCH_DDOC}/_rewrite/`);
+          })().catch((err) => {
+            console.error(err);
+            process.exit(1);
+          });
+          NODE
