@@ -136,8 +136,6 @@ export default function Wrapper() {
     }
 
     return (
-        <div style={{ minHeight: "100vh" }}>
-            <Outlet />
-        </div>
+        <Outlet />
     );
 }

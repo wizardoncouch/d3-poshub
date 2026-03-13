@@ -12,9 +12,10 @@ body {
   @media (prefers-color-scheme: dark) {
     color-scheme: dark;
   }
+  height: 100%;
 }
 .shake {
-  animation: shake 0.4s ease;
+  animation: shake 0.2s ease;
 }
 
 @keyframes shake {

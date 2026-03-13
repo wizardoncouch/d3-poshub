@@ -81,59 +81,29 @@ export default function NumpadPasscode({
 
     const buttons = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
 
+    const buttonClass = "h-[80px] w-[80px] rounded-xl border border-gray-100 text-lg pointer shadow-sm transition hover:-translate-y-1 hover:shadow-md active:border-gray-100 active:scale-[0.98]";
+    const keyClass = `${buttonClass} bg-white`;
+    const actionClass = `${buttonClass} bg-gray-100`;
+
     return (
-        <div
-            style={{
-                width: "100%",
-                maxWidth: 360,
-                margin: "0 auto",
-                display: "flex",
-                flexDirection: "column",
-                gap: 16,
-            }}
-        >
-            <div
-                style={{
-                    display: "flex",
-                    justifyContent: "center",
-                    gap: 10,
-                }}
-            >
+        <div className="w-full max-w-[360px] mx-auto my-0 flex flex-col gap-4">
+            <div className="flex justify-center gap-2">
                 {maskedValue.map((char, index) => (
-                    <div
-                        key={index}
-                        style={{
-                            width: 20,
-                            height: 20,
-                            border: "1px solid #ccc",
-                            borderRadius: 15,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 30,
-                            fontWeight: 700,
-                            background: char == 'x' ? "#a1a1a1" : "#ffffff"
-                        }}
-                    >
+                    <div className={`w-[20px] h-[20px] border-1 border-gray-400 rounded-full flex justify-center items-center ${char == 'x' ? 'bg-gray-500' : "bg-stone-100"}`}
+                        key={index}>
                         {/* {char} */}
                     </div>
                 ))}
             </div>
 
-            <div
-                style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: 8,
-                }}
-            >
+            <div className="grid gap-3 grid-cols-3">
                 {buttons.map((digit) => (
                     <button
+                        className={keyClass}
                         key={digit}
                         type="button"
                         onClick={() => handleDigit(digit)}
                         disabled={disabled}
-                        style={keyStyle}
                     >
                         {digit}
                     </button>
@@ -141,27 +111,27 @@ export default function NumpadPasscode({
 
                 <button
                     type="button"
+                    className={actionClass}
                     onClick={handleClear}
                     disabled={disabled}
-                    style={actionStyle}
                 >
                     Clear
                 </button>
 
                 <button
                     type="button"
+                    className={keyClass}
                     onClick={() => handleDigit("0")}
                     disabled={disabled}
-                    style={keyStyle}
                 >
                     0
                 </button>
 
                 <button
                     type="button"
+                    className={actionClass}
                     onClick={handleBackspace}
                     disabled={disabled}
-                    style={actionStyle}
                 >
                     ⌫
                 </button>
@@ -188,25 +158,3 @@ export default function NumpadPasscode({
         </div>
     );
 }
-
-const keyStyle: React.CSSProperties = {
-    height: 80,
-    width: 80,
-    borderRadius: 12,
-    border: "1px solid #ccc",
-    background: "#fff",
-    fontSize: 22,
-    fontWeight: 700,
-    cursor: "pointer",
-};
-
-const actionStyle: React.CSSProperties = {
-    height: 80,
-    width: 80,
-    borderRadius: 12,
-    border: "1px solid #ccc",
-    background: "#f7f7f7",
-    fontSize: 16,
-    fontWeight: 600,
-    cursor: "pointer",
-};

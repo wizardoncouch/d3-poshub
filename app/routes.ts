@@ -19,8 +19,16 @@ export default [
                 route('f', 'routes/terminal/floor.tsx'),
             ])
         ]),
+        ...prefix('i', [
+            route('l', 'routes/inventory/login.tsx'),
+            layout('layouts/InventoryProtected.tsx', [
+                index("routes/inventory/main.tsx"),
+                route('c', 'routes/inventory/create.tsx')
+            ])
+        ]),
         ...prefix('o', [
             layout('layouts/Observer.tsx', [
+                index('routes/observe.tsx')
             ])
         ]),
     ]),
